@@ -61,6 +61,21 @@ def log_trade(record):
 
 
 def run():
+    trading_client = TradingClient(
+        os.getenv("ALPACA_API_KEY"), os.getenv("ALPACA_SECRET_KEY"), paper=True
+    )
+
+    # Check market hours before spending anything on the LLM — there's no
+    # point paying for a signal we can't act on.
+    if not trading_client.get_clock().is_open:
+        print("Market closed, skipping this cycle")
+        log_trade({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "type": "skipped",
+            "reason": "market closed",
+        })
+        return
+
     signal, confidence, reason = get_signal()
     print(f"Signal: {signal} | Confidence: {confidence} | Reason: {reason}")
 
@@ -69,11 +84,9 @@ def run():
         return
 
     contract = select_option_contract(signal)
-    trading_client = TradingClient(
-        os.getenv("ALPACA_API_KEY"), os.getenv("ALPACA_SECRET_KEY"), paper=True
-    )
 
     record = {
+        "type": "trade_attempt",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "signal": signal,
         "confidence": confidence,
