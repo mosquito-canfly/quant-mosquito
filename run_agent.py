@@ -27,8 +27,15 @@ sys.stdout.reconfigure(encoding="utf-8")
 load_dotenv()
 
 LOG_FILE = "trade_log.jsonl"
-RISK_FRACTION = 0.01  # risk 1% of cash per trade
 HARD_CAP_USD = 2000  # never risk more than this on one trade, no matter what
+
+# A more confident signal earns a bigger risk budget; a less confident one
+# stays small in case the LLM's read on the market is wrong.
+RISK_FRACTION_BY_CONFIDENCE = {
+    "LOW": 0.005,
+    "MEDIUM": 0.01,
+    "HIGH": 0.015,
+}
 
 
 def fetch_ask_price(symbol):
@@ -40,17 +47,22 @@ def fetch_ask_price(symbol):
     return client.get_option_latest_quote(request)[symbol].ask_price
 
 
-def calculate_contracts(cash, ask_price):
+def calculate_contracts(cash, ask_price, confidence):
     """How many contracts to buy.
 
     Each option contract controls 100 shares, so its dollar cost is
-    ask_price * 100. We budget 1% of cash for the trade, but never more
-    than HARD_CAP_USD even if 1% of cash would be bigger. If that budget
-    can't afford even one contract, we still buy 1 as long as a single
-    contract itself fits under the hard cap — otherwise we buy 0 (skip).
+    ask_price * 100. We budget a fraction of cash for the trade based on
+    the LLM's confidence (see RISK_FRACTION_BY_CONFIDENCE), but never more
+    than HARD_CAP_USD even if that fraction of cash would be bigger. If
+    the budget can't afford even one contract, we still buy 1 as long as a
+    single contract itself fits under the hard cap — otherwise we buy 0.
     """
+    # Falls back to MEDIUM if the LLM ever replies with something outside
+    # LOW/MEDIUM/HIGH — consistent with the rest of the agent never crashing
+    # on a malformed model response.
+    risk_fraction = RISK_FRACTION_BY_CONFIDENCE.get(confidence, RISK_FRACTION_BY_CONFIDENCE["MEDIUM"])
     cost_per_contract = ask_price * 100
-    budget = min(cash * RISK_FRACTION, HARD_CAP_USD)
+    budget = min(cash * risk_fraction, HARD_CAP_USD)
     contracts = int(budget // cost_per_contract)
     if contracts == 0 and cost_per_contract <= HARD_CAP_USD:
         contracts = 1
@@ -152,7 +164,7 @@ def run():
     try:
         ask_price = fetch_ask_price(contract.symbol)
         cash = float(trading_client.get_account().cash)
-        contracts = calculate_contracts(cash, ask_price)
+        contracts = calculate_contracts(cash, ask_price, confidence)
 
         if contracts == 0:
             record["order_status"] = "skipped_too_expensive"
