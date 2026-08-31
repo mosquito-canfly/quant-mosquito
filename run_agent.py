@@ -6,19 +6,22 @@ Run this to execute one trading cycle on the paper account.
 import json
 import os
 import sys
+import uuid
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 from alpaca.trading.client import TradingClient
-from alpaca.trading.requests import MarketOrderRequest
-from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca.data.historical.option import OptionHistoricalDataClient
 from alpaca.data.requests import OptionLatestQuoteRequest
-from alpaca.common.exceptions import APIError
 
 from get_signal import get_signal
 from options_selector import select_option_contract
-from position_manager import get_open_positions, check_exit_conditions, close_position
+from position_manager import (
+    get_open_positions,
+    check_exit_conditions,
+    close_position,
+    run_alpaca_cli,
+)
 
 sys.stdout.reconfigure(encoding="utf-8")
 load_dotenv()
@@ -87,9 +90,9 @@ def manage_open_positions():
         }
         try:
             order = close_position(position)
-            record["order_id"] = str(order.id)
-            record["order_status"] = order.status.value
-        except APIError as e:
+            record["order_id"] = order["id"]
+            record["order_status"] = order["status"]
+        except RuntimeError as e:
             # A close failing shouldn't crash the cycle — log it and leave
             # the position open so the next run tries again.
             record["order_status"] = f"error: {e}"
@@ -156,19 +159,21 @@ def run():
             log_trade(record)
             return
 
-        order = trading_client.submit_order(
-            order_data=MarketOrderRequest(
-                symbol=contract.symbol,
-                qty=contracts,
-                side=OrderSide.BUY,
-                time_in_force=TimeInForce.DAY,
-            )
-        )
+        # A fresh client-order-id per attempt lets a retried run be told
+        # apart from a genuine duplicate order, per Alpaca's automation guidance.
+        order = run_alpaca_cli([
+            "order", "submit",
+            "--symbol", contract.symbol,
+            "--side", "buy",
+            "--qty", str(contracts),
+            "--type", "market",
+            "--client-order-id", str(uuid.uuid4()),
+        ])
         record["contracts_bought"] = contracts
         record["premium_paid"] = ask_price
-        record["order_id"] = str(order.id)
-        record["order_status"] = order.status.value
-    except APIError as e:
+        record["order_id"] = order["id"]
+        record["order_status"] = order["status"]
+    except RuntimeError as e:
         # Paper account quirks (contract not tradable, insufficient buying
         # power, etc.) shouldn't crash the agent — log and move on so the
         # next scheduled run can still try.

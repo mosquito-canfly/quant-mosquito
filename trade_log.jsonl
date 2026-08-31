@@ -1,3 +1,5 @@
 {"timestamp": "2026-08-30T16:34:48.941894+00:00", "signal": "BEARISH", "confidence": "LOW", "reason": "The 5-day SMA is below the 20-day SMA, and the momentum is slightly positive but low.", "contract_symbol": "SPY260908P00769000", "strike": 769.0, "expiration": "2026-09-08", "contracts_bought": 0, "premium_paid": null, "order_id": null, "order_status": "error: {\"code\":42210000,\"message\":\"options market orders are only allowed during market hours\"}"}
 {"timestamp": "2026-08-31T08:14:57.080379+00:00", "type": "skipped", "reason": "market closed"}
 {"timestamp": "2026-08-31T10:04:30.628339+00:00", "type": "skipped", "reason": "market closed"}
+{"timestamp": "2026-08-31T10:32:50.001452+00:00", "type": "skipped", "reason": "market closed"}
+{"timestamp": "2026-08-31T10:33:34.846316+00:00", "type": "skipped", "reason": "market closed"}
