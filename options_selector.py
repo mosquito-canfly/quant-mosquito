@@ -85,6 +85,17 @@ def pick_contract(trading_client, signal, current_price):
     return best
 
 
+def select_option_contract(signal):
+    """Pick a contract for the given signal. Returns the alpaca-py contract
+    object (has .symbol, .strike_price, .expiration_date, .type) or None
+    for NEUTRAL, where there's nothing to select."""
+    if signal == "NEUTRAL":
+        return None
+    trading_client = check_options_enabled()
+    price = fetch_current_price()
+    return pick_contract(trading_client, signal, price)
+
+
 if __name__ == "__main__":
     if SIGNAL == "NEUTRAL":
         print("No trade")

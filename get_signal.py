@@ -77,6 +77,15 @@ def parse_signal(text):
     return result
 
 
+def get_signal():
+    """Run the full pipeline and return (signal, confidence, reason)."""
+    closes = fetch_closes()
+    sma5, sma20, momentum_pct = compute_indicators(closes)
+    raw_reply = ask_llm(sma5, sma20, momentum_pct)
+    parsed = parse_signal(raw_reply)
+    return parsed["SIGNAL"], parsed["CONFIDENCE"], parsed["REASON"]
+
+
 if __name__ == "__main__":
     closes = fetch_closes()
     sma5, sma20, momentum_pct = compute_indicators(closes)
