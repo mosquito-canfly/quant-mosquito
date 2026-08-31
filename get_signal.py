@@ -6,7 +6,8 @@ from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
 from alpaca.data.historical import StockHistoricalDataClient
-from alpaca.data.requests import StockBarsRequest
+from alpaca.data.historical.news import NewsClient
+from alpaca.data.requests import StockBarsRequest, NewsRequest
 from alpaca.data.timeframe import TimeFrame
 from alpaca.data.enums import DataFeed
 from openai import OpenAI
@@ -35,6 +36,16 @@ def fetch_closes():
     return bars["close"].tail(25).tolist()
 
 
+def fetch_recent_news(symbol="SPY", limit=5):
+    """Most recent headlines for symbol from the last 3 days, newest first.
+    Just headlines (not full articles) to keep the prompt small. Returns
+    an empty list if there's no news, rather than erroring out."""
+    client = NewsClient(os.getenv("ALPACA_API_KEY"), os.getenv("ALPACA_SECRET_KEY"))
+    request = NewsRequest(symbols=symbol, start=datetime.now() - timedelta(days=3), limit=limit)
+    articles = client.get_news(request).data.get("news", [])
+    return [a.headline for a in articles]
+
+
 def compute_indicators(closes):
     """SMA5, SMA20, and 5-day momentum (%) from a list of closes, oldest first."""
     sma5 = sum(closes[-5:]) / 5
@@ -43,17 +54,26 @@ def compute_indicators(closes):
     return sma5, sma20, momentum_pct
 
 
-def ask_llm(sma5, sma20, momentum_pct):
-    """Send the indicators to Featherless and return the raw text response."""
+def ask_llm(sma5, sma20, momentum_pct, headlines=None):
+    """Send the indicators (and any recent headlines) to Featherless and
+    return the raw text response."""
     client = OpenAI(
         api_key=os.getenv("FEATHERLESS_API_KEY"),
         base_url=os.getenv("FEATHERLESS_BASE_URL"),
     )
+    # Only mention news at all if we actually found some — an empty
+    # "Recent headlines:" section would just be noise in the prompt.
+    news_section = ""
+    if headlines:
+        bullets = "\n".join(f"- {h}" for h in headlines)
+        news_section = f"Recent headlines:\n{bullets}\n\n"
+
     prompt = (
         f"You are a stock market analyst looking at {SYMBOL}.\n"
         f"5-day SMA: {sma5:.2f}\n"
         f"20-day SMA: {sma20:.2f}\n"
         f"5-day momentum: {momentum_pct:.2f}%\n\n"
+        f"{news_section}"
         "Respond in exactly this format:\n"
         "SIGNAL: [BULLISH/BEARISH/NEUTRAL]\n"
         "CONFIDENCE: [LOW/MEDIUM/HIGH]\n"
@@ -81,7 +101,8 @@ def get_signal():
     """Run the full pipeline and return (signal, confidence, reason)."""
     closes = fetch_closes()
     sma5, sma20, momentum_pct = compute_indicators(closes)
-    raw_reply = ask_llm(sma5, sma20, momentum_pct)
+    headlines = fetch_recent_news(SYMBOL)
+    raw_reply = ask_llm(sma5, sma20, momentum_pct, headlines)
     parsed = parse_signal(raw_reply)
     return parsed["SIGNAL"], parsed["CONFIDENCE"], parsed["REASON"]
 
@@ -95,7 +116,15 @@ if __name__ == "__main__":
     print(f"  SMA20:           {sma20:.2f}")
     print(f"  5-day momentum:  {momentum_pct:.2f}%")
 
-    raw_reply = ask_llm(sma5, sma20, momentum_pct)
+    headlines = fetch_recent_news(SYMBOL)
+    print(f"\nRecent headlines ({len(headlines)} found)")
+    if headlines:
+        for h in headlines:
+            print(f"  - {h}")
+    else:
+        print("  none found")
+
+    raw_reply = ask_llm(sma5, sma20, momentum_pct, headlines)
     signal = parse_signal(raw_reply)
 
     print("\nLLM signal")
