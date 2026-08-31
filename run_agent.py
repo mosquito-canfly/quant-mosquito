@@ -18,6 +18,7 @@ from alpaca.common.exceptions import APIError
 
 from get_signal import get_signal
 from options_selector import select_option_contract
+from position_manager import get_open_positions, check_exit_conditions, close_position
 
 sys.stdout.reconfigure(encoding="utf-8")
 load_dotenv()
@@ -60,6 +61,45 @@ def log_trade(record):
         f.write(json.dumps(record, default=str) + "\n")
 
 
+def manage_open_positions():
+    """Close any open position that's hit take-profit, stop-loss, or is
+    about to expire, and log each close. Returns the symbols still open
+    afterward, so the entry logic can avoid re-buying the same contract."""
+    positions = get_open_positions()
+    still_open = set()
+
+    for position in positions:
+        exit_reason = check_exit_conditions(position)
+        if exit_reason is None:
+            still_open.add(position.symbol)
+            continue
+
+        record = {
+            "type": "exit",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "symbol": position.symbol,
+            "exit_reason": exit_reason,
+            "entry_price": float(position.avg_entry_price),
+            "exit_price": float(position.current_price),
+            "realized_pl": float(position.unrealized_pl),
+            "order_id": None,
+            "order_status": None,
+        }
+        try:
+            order = close_position(position)
+            record["order_id"] = str(order.id)
+            record["order_status"] = order.status.value
+        except APIError as e:
+            # A close failing shouldn't crash the cycle — log it and leave
+            # the position open so the next run tries again.
+            record["order_status"] = f"error: {e}"
+            still_open.add(position.symbol)
+
+        log_trade(record)
+
+    return still_open
+
+
 def run():
     trading_client = TradingClient(
         os.getenv("ALPACA_API_KEY"), os.getenv("ALPACA_SECRET_KEY"), paper=True
@@ -76,6 +116,8 @@ def run():
         })
         return
 
+    open_symbols = manage_open_positions()
+
     signal, confidence, reason = get_signal()
     print(f"Signal: {signal} | Confidence: {confidence} | Reason: {reason}")
 
@@ -84,6 +126,10 @@ def run():
         return
 
     contract = select_option_contract(signal)
+
+    if contract.symbol in open_symbols:
+        print(f"Already holding {contract.symbol}, skipping duplicate entry")
+        return
 
     record = {
         "type": "trade_attempt",
