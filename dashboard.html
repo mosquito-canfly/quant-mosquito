@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Quant Mosquito — Trade Log Dashboard</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --card-bg: #1a1d24;
+    --border: #2a2e37;
+    --text: #e6e8eb;
+    --text-dim: #9aa1ac;
+    --green: #3ecf6c;
+    --red: #e8555a;
+    --grey: #6b7280;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 2rem;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+  }
+  h1 { margin: 0 0 0.25rem; font-size: 1.5rem; }
+  .subtitle { color: var(--text-dim); margin-bottom: 1.5rem; }
+
+  .stats {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 2rem;
+    flex-wrap: wrap;
+  }
+  .stat {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.75rem 1.25rem;
+    min-width: 140px;
+  }
+  .stat .num { font-size: 1.75rem; font-weight: 600; }
+  .stat .label { color: var(--text-dim); font-size: 0.85rem; }
+
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 0.75rem;
+  }
+  .card.skipped { opacity: 0.55; }
+  .card-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.4rem;
+  }
+  .timestamp { color: var(--text-dim); font-size: 0.85rem; }
+
+  .badge {
+    display: inline-block;
+    padding: 0.15rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+  .badge.BULLISH { background: rgba(62,207,108,0.15); color: var(--green); }
+  .badge.BEARISH { background: rgba(232,85,90,0.15); color: var(--red); }
+  .badge.NEUTRAL { background: rgba(107,114,128,0.2); color: var(--grey); }
+
+  .reason { color: var(--text-dim); margin: 0.4rem 0; font-size: 0.95rem; }
+
+  .details {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 0.4rem 1rem;
+    margin-top: 0.5rem;
+    font-size: 0.9rem;
+  }
+  .details div span { color: var(--text-dim); display: block; font-size: 0.75rem; }
+
+  .status { font-weight: 600; }
+  .status.ok { color: var(--green); }
+  .status.bad { color: var(--red); }
+  .status.neutral { color: var(--grey); }
+
+  #error { color: var(--red); }
+</style>
+</head>
+<body>
+  <h1>Quant Mosquito</h1>
+  <div class="subtitle">Trade log dashboard — read-only view of trade_log.jsonl</div>
+
+  <div class="stats" id="stats"></div>
+  <div id="cards"></div>
+  <div id="error"></div>
+
+<script>
+// Color a status word green (success-ish) or red (error/skip), grey otherwise.
+function statusClass(status) {
+  if (!status) return "neutral";
+  const s = status.toLowerCase();
+  if (s.includes("error") || s.includes("skipped")) return "bad";
+  if (s.includes("fill") || s.includes("accept") || s.includes("new") || s.includes("pending")) return "ok";
+  return "neutral";
+}
+
+function fmtTime(ts) {
+  const d = new Date(ts);
+  return isNaN(d) ? ts : d.toLocaleString();
+}
+
+function renderSkipped(entry) {
+  return `<div class="card skipped">
+    <div class="card-top">
+      <span>Market closed — skipped</span>
+      <span class="timestamp">${fmtTime(entry.timestamp)}</span>
+    </div>
+  </div>`;
+}
+
+function renderTrade(entry) {
+  const signal = entry.signal || "?";
+  const status = entry.order_status || "";
+  return `<div class="card">
+    <div class="card-top">
+      <span class="badge ${signal}">${signal}</span>
+      <span class="timestamp">${fmtTime(entry.timestamp)}</span>
+    </div>
+    <p class="reason">${entry.reason || ""}</p>
+    <div class="details">
+      <div><span>Confidence</span>${entry.confidence || "-"}</div>
+      <div><span>Contract</span>${entry.contract_symbol || "-"}</div>
+      <div><span>Strike</span>${entry.strike ?? "-"}</div>
+      <div><span>Expiration</span>${entry.expiration || "-"}</div>
+      <div><span>Contracts bought</span>${entry.contracts_bought ?? "-"}</div>
+      <div><span>Order status</span><span class="status ${statusClass(status)}">${status || "-"}</span></div>
+    </div>
+  </div>`;
+}
+
+fetch("trade_log.jsonl")
+  .then(r => {
+    if (!r.ok) throw new Error("fetch failed: " + r.status);
+    return r.text();
+  })
+  .then(text => {
+    const entries = text.split("\n")
+      .map(line => line.trim())
+      .filter(Boolean)
+      .map(line => JSON.parse(line))
+      .reverse(); // newest first
+
+    const skipped = entries.filter(e => e.type === "skipped").length;
+    const trades = entries.length - skipped;
+
+    document.getElementById("stats").innerHTML = `
+      <div class="stat"><div class="num">${entries.length}</div><div class="label">Total cycles</div></div>
+      <div class="stat"><div class="num">${trades}</div><div class="label">Trades attempted</div></div>
+      <div class="stat"><div class="num">${skipped}</div><div class="label">Skipped (market closed)</div></div>
+    `;
+
+    document.getElementById("cards").innerHTML = entries
+      .map(e => e.type === "skipped" ? renderSkipped(e) : renderTrade(e))
+      .join("");
+  })
+  .catch(err => {
+    document.getElementById("error").textContent =
+      "Could not load trade_log.jsonl (" + err.message + "). " +
+      "If you opened this file directly (file://), browsers block that fetch — " +
+      "run 'python -m http.server' in this folder and open http://localhost:8000/dashboard.html instead.";
+  });
+</script>
+</body>
+</html>
