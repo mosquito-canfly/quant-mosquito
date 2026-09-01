@@ -85,17 +85,120 @@
   .status.neutral { color: var(--grey); }
 
   #error { color: var(--red); }
+
+  .chart-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.5rem;
+  }
+  .chart-card h2 { margin: 0 0 0.75rem; font-size: 1rem; font-weight: 600; }
+  #equity-chart { width: 100%; height: 220px; display: block; }
+  #equity-empty { color: var(--text-dim); font-size: 0.9rem; }
 </style>
 </head>
 <body>
   <h1>Quant Mosquito</h1>
   <div class="subtitle">Trade log dashboard — read-only view of trade_log.jsonl</div>
 
+  <div class="chart-card">
+    <h2>Equity curve</h2>
+    <canvas id="equity-chart"></canvas>
+    <div id="equity-empty" style="display:none;">No portfolio_history.json found — run export_portfolio_history.py first.</div>
+  </div>
+
   <div class="stats" id="stats"></div>
   <div id="cards"></div>
   <div id="error"></div>
 
 <script>
+const STARTING_EQUITY = 100000;
+
+// Draw a simple equity-over-time line chart with plain canvas, no library.
+function drawEquityChart(canvas, points) {
+  const dpr = window.devicePixelRatio || 1;
+  const cssWidth = canvas.clientWidth;
+  const cssHeight = canvas.clientHeight;
+  canvas.width = cssWidth * dpr;
+  canvas.height = cssHeight * dpr;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+
+  const padding = { top: 10, right: 15, bottom: 24, left: 70 };
+  const chartW = cssWidth - padding.left - padding.right;
+  const chartH = cssHeight - padding.top - padding.bottom;
+
+  const values = points.map(p => p.equity_value);
+  const min = Math.min(...values, STARTING_EQUITY);
+  const max = Math.max(...values, STARTING_EQUITY);
+  const range = max - min || 1;
+
+  const xForIndex = i => padding.left + (i / (points.length - 1)) * chartW;
+  const yForValue = v => padding.top + chartH - ((v - min) / range) * chartH;
+
+  ctx.clearRect(0, 0, cssWidth, cssHeight);
+  ctx.font = "11px -apple-system, Segoe UI, Roboto, sans-serif";
+
+  // Y-axis grid lines + $ labels (4 bands).
+  ctx.strokeStyle = "#2a2e37";
+  ctx.fillStyle = "#9aa1ac";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  const bands = 4;
+  for (let i = 0; i <= bands; i++) {
+    const v = min + (range * i) / bands;
+    const y = yForValue(v);
+    ctx.beginPath();
+    ctx.moveTo(padding.left, y);
+    ctx.lineTo(padding.left + chartW, y);
+    ctx.stroke();
+    ctx.fillText("$" + Math.round(v).toLocaleString(), padding.left - 8, y);
+  }
+
+  // Dashed reference line at the starting equity, so gains/losses read at a glance.
+  const startY = yForValue(STARTING_EQUITY);
+  ctx.save();
+  ctx.setLineDash([4, 4]);
+  ctx.strokeStyle = "#6b7280";
+  ctx.beginPath();
+  ctx.moveTo(padding.left, startY);
+  ctx.lineTo(padding.left + chartW, startY);
+  ctx.stroke();
+  ctx.restore();
+
+  // X-axis labels: first, middle, last timestamp.
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  [0, Math.floor((points.length - 1) / 2), points.length - 1].forEach(i => {
+    const label = new Date(points[i].timestamp).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    ctx.fillText(label, xForIndex(i), padding.top + chartH + 6);
+  });
+
+  // The equity line itself — green if up from the start, red if down.
+  const up = values[values.length - 1] >= STARTING_EQUITY;
+  ctx.strokeStyle = up ? "#3ecf6c" : "#e8555a";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  points.forEach((p, i) => {
+    const x = xForIndex(i);
+    const y = yForValue(p.equity_value);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+}
+
+fetch("portfolio_history.json")
+  .then(r => { if (!r.ok) throw new Error("not found"); return r.json(); })
+  .then(points => {
+    if (!points.length) throw new Error("empty");
+    drawEquityChart(document.getElementById("equity-chart"), points);
+  })
+  .catch(() => {
+    document.getElementById("equity-chart").style.display = "none";
+    document.getElementById("equity-empty").style.display = "block";
+  });
+
 // Color a status word green (success-ish) or red (error/skip), grey otherwise.
 function statusClass(status) {
   if (!status) return "neutral";

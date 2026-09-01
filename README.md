@@ -45,9 +45,15 @@ It's safe to run outside market hours — `run_agent.py` checks Alpaca's clock f
 
 ## Dashboard
 
-`dashboard.html` is a static, dependency-free page that reads `trade_log.jsonl` and renders each cycle as a card (signal, reasoning, contract, order status), newest first, with header counts for total/traded/skipped cycles.
+`dashboard.html` is a static, dependency-free page. It renders an equity curve at the top (portfolio value over time, plotted with plain `<canvas>` — no chart library) followed by a card per cycle from `trade_log.jsonl` (signal, reasoning, contract, order status), newest first, with header counts for total/traded/skipped cycles.
 
-Open it directly, or if your browser blocks local `fetch()` on `file://` URLs, serve the folder:
+The equity curve reads `portfolio_history.json`, a static snapshot — it does not update live. Re-run this before opening the dashboard to refresh it:
+
+```bash
+python export_portfolio_history.py
+```
+
+Open `dashboard.html` directly, or if your browser blocks local `fetch()` on `file://` URLs, serve the folder:
 
 ```bash
 python -m http.server
@@ -57,6 +63,6 @@ then visit `http://localhost:8000/dashboard.html`.
 
 ## Risk management
 
-- Each trade risks at most **1%** of current account cash.
-- Regardless of the 1% calculation, no single trade risks more than a **$2,000 hard cap**.
-- If 1% of cash can't afford even one contract but one contract still fits under the $2,000 cap, the agent buys a minimum of 1 contract; if even one contract exceeds the cap, it skips the trade.
+- Each trade risks a fraction of current account cash based on the LLM's confidence: **0.5%** (LOW), **1%** (MEDIUM), or **1.5%** (HIGH).
+- Regardless of that percentage, no single trade risks more than a **$2,000 hard cap**.
+- If the risk budget can't afford even one contract but one contract still fits under the $2,000 cap, the agent buys a minimum of 1 contract; if even one contract exceeds the cap, it skips the trade.
