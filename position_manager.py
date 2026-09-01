@@ -48,6 +48,16 @@ def run_alpaca_cli(args):
     return json.loads(result.stdout)
 
 
+def verify_paper_endpoint():
+    """Confirm the CLI actually resolves to Alpaca's paper endpoint before
+    any order gets anywhere near it. `alpaca doctor` isn't a --quiet/JSON
+    command like run_alpaca_cli's callers, and it can exit 1 for unrelated
+    reasons (e.g. an update check), so this scans its plain-text output for
+    the Trading: line itself rather than trusting the exit code alone."""
+    result = subprocess.run([str(ALPACA_CLI), "doctor"], capture_output=True, text=True)
+    return "https://paper-api.alpaca.markets" in result.stdout
+
+
 # OCC option symbols end in a fixed 15-char suffix: 6-digit date (YYMMDD),
 # 1-char C/P, 8-digit strike (e.g. "SPY260908P00769000" -> "260908").
 _OCC_DATE_RE = re.compile(r"(\d{6})[CP]\d{8}$")

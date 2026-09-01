@@ -21,6 +21,7 @@ from position_manager import (
     check_exit_conditions,
     close_position,
     run_alpaca_cli,
+    verify_paper_endpoint,
 )
 
 sys.stdout.reconfigure(encoding="utf-8")
@@ -155,6 +156,19 @@ def run():
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "type": "skipped",
             "reason": "market closed",
+        })
+        return
+
+    # One safety check per cycle, before any order logic can run: make sure
+    # the CLI actually resolves to the paper endpoint. If a stray env var
+    # or bad config ever pointed it at live trading, this is what catches
+    # it — nothing past this point should ever place a real order.
+    if not verify_paper_endpoint():
+        print("SAFETY ABORT: alpaca CLI is not pointed at the paper endpoint")
+        log_trade({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "type": "safety_abort",
+            "reason": "CLI not pointed at paper endpoint",
         })
         return
 

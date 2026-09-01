@@ -25,6 +25,10 @@ load_dotenv()
 SYMBOL = "SPY"
 LOOKAHEAD_DAYS = 5  # how far ahead we check whether the call was right
 RESULTS_FILE = "backtest_results.csv"
+DISCLAIMER = (
+    "Note: hypothetical backtest results do not guarantee future performance; "
+    "this validates directional signal accuracy only, not simulated P&L."
+)
 
 
 def fetch_history():
@@ -86,10 +90,12 @@ def summarize(rows):
     print(f"{'BULLISH':14}{len(bullish):>8}{len(bullish) / total * 100:>11.1f}%{accuracy(bullish):>11.1f}%")
     print(f"{'BEARISH':14}{len(bearish):>8}{len(bearish) / total * 100:>11.1f}%{accuracy(bearish):>11.1f}%")
     print(f"{'OVERALL':14}{total:>8}{100.0:>11.1f}%{accuracy(rows):>11.1f}%")
+    print(f"\n{DISCLAIMER}")
 
 
 def write_csv(rows):
     with open(RESULTS_FILE, "w", newline="") as f:
+        f.write(f"# {DISCLAIMER}\n")
         writer = csv.DictWriter(f, fieldnames=[
             "date", "sma5", "sma20", "signal", "price_5d_later", "actual_direction", "correct"
         ])

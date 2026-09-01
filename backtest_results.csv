@@ -1,3 +1,4 @@
+# Note: hypothetical backtest results do not guarantee future performance; this validates directional signal accuracy only, not simulated P&L.
 date,sma5,sma20,signal,price_5d_later,actual_direction,correct
 2026-05-21,739.06,729.95,BULLISH,756.34,UP,True
 2026-05-22,740.38,731.54,BULLISH,758.44,UP,True
