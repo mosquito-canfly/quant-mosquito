@@ -6,3 +6,4 @@ logs/
 tools/
 task_backup.xml
 modified_task.xml
+daily_state.json

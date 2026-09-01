@@ -7,7 +7,7 @@ import json
 import os
 import sys
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from dotenv import load_dotenv
 from alpaca.trading.client import TradingClient
@@ -27,7 +27,9 @@ sys.stdout.reconfigure(encoding="utf-8")
 load_dotenv()
 
 LOG_FILE = "trade_log.jsonl"
+DAILY_STATE_FILE = "daily_state.json"
 HARD_CAP_USD = 2000  # never risk more than this on one trade, no matter what
+CIRCUIT_BREAKER_PCT = 0.05  # halt new entries once the day is down this much
 
 # A more confident signal earns a bigger risk budget; a less confident one
 # stays small in case the LLM's read on the market is wrong.
@@ -67,6 +69,31 @@ def calculate_contracts(cash, ask_price, confidence):
     if contracts == 0 and cost_per_contract <= HARD_CAP_USD:
         contracts = 1
     return contracts
+
+
+def get_daily_starting_equity(current_equity):
+    """Today's starting-equity baseline, resetting it if the stored state
+    is missing or from a previous day (a new trading day gets a fresh
+    baseline to measure the day's loss against)."""
+    today = date.today().isoformat()
+    if os.path.exists(DAILY_STATE_FILE):
+        with open(DAILY_STATE_FILE) as f:
+            state = json.load(f)
+        if state.get("date") == today:
+            return state["starting_equity"]
+
+    state = {"date": today, "starting_equity": current_equity}
+    with open(DAILY_STATE_FILE, "w") as f:
+        json.dump(state, f)
+    return current_equity
+
+
+def check_circuit_breaker(starting_equity, current_equity):
+    """How far down are we from today's starting equity, and has that
+    crossed the halt threshold. Pulled out as a pure function so it's
+    testable without touching Alpaca or the filesystem."""
+    daily_loss_pct = (starting_equity - current_equity) / starting_equity
+    return daily_loss_pct >= CIRCUIT_BREAKER_PCT, daily_loss_pct
 
 
 def log_trade(record):
@@ -131,7 +158,23 @@ def run():
         })
         return
 
+    current_equity = float(trading_client.get_account().portfolio_value)
+    starting_equity = get_daily_starting_equity(current_equity)
+    circuit_breaker_triggered, daily_loss_pct = check_circuit_breaker(starting_equity, current_equity)
+
+    # Exits always run, breaker or not — closing a losing position is how
+    # you stop a bad day from getting worse, so it must never be gated by
+    # the same check that halts new entries.
     open_symbols = manage_open_positions()
+
+    if circuit_breaker_triggered:
+        print(f"Circuit breaker triggered: down {daily_loss_pct:.1%} today, skipping new entries")
+        log_trade({
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "type": "circuit_breaker_halt",
+            "daily_loss_pct": daily_loss_pct,
+        })
+        return
 
     signal, confidence, reason = get_signal()
     print(f"Signal: {signal} | Confidence: {confidence} | Reason: {reason}")
