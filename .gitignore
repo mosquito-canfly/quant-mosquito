@@ -4,3 +4,5 @@ venv/
 __pycache__/
 logs/
 tools/
+task_backup.xml
+modified_task.xml
