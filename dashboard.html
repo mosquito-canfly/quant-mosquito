@@ -118,8 +118,13 @@ const STARTING_EQUITY = 100000;
 // Draw a simple equity-over-time line chart with plain canvas, no library.
 function drawEquityChart(canvas, points) {
   const dpr = window.devicePixelRatio || 1;
-  const cssWidth = canvas.clientWidth;
-  const cssHeight = canvas.clientHeight;
+  // ponytail: clientWidth/Height can legitimately read 0 if a layout pass
+  // hasn't happened yet when this runs (e.g. a very fast local fetch
+  // resolving before first paint). Falling back to the parent's width and
+  // the CSS-declared height keeps the chart visible instead of blank;
+  // ResizeObserver corrects it to the exact size once layout catches up.
+  const cssWidth = canvas.clientWidth || canvas.parentElement.clientWidth || 760;
+  const cssHeight = canvas.clientHeight || 220;
   canvas.width = cssWidth * dpr;
   canvas.height = cssHeight * dpr;
   const ctx = canvas.getContext("2d");
@@ -188,11 +193,25 @@ function drawEquityChart(canvas, points) {
   ctx.stroke();
 }
 
+// Redraws whenever the canvas's actual size changes -- not just once at
+// load. A one-time draw can catch the canvas at 0 width (e.g. the tab or
+// pane is hidden at that moment) and never recover once it's visible;
+// ResizeObserver fires again as soon as a real size shows up.
+let equityPoints = null;
+const equityCanvas = document.getElementById("equity-chart");
+// Must stay referenced -- an observer with no live reference is eligible
+// for GC, which silently stops its callback from firing.
+const equityResizeObserver = new ResizeObserver(() => {
+  if (equityPoints) drawEquityChart(equityCanvas, equityPoints);
+});
+equityResizeObserver.observe(equityCanvas);
+
 fetch("portfolio_history.json")
   .then(r => { if (!r.ok) throw new Error("not found"); return r.json(); })
   .then(points => {
     if (!points.length) throw new Error("empty");
-    drawEquityChart(document.getElementById("equity-chart"), points);
+    equityPoints = points;
+    drawEquityChart(equityCanvas, points);
   })
   .catch(() => {
     document.getElementById("equity-chart").style.display = "none";
