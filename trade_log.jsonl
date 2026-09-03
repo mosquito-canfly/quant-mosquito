@@ -39,3 +39,17 @@
 {"timestamp": "2026-09-02T03:30:13.440072+00:00", "type": "skipped", "reason": "market closed"}
 {"timestamp": "2026-09-02T04:30:18.110598+00:00", "type": "skipped", "reason": "market closed"}
 {"timestamp": "2026-09-02T05:30:11.727368+00:00", "type": "skipped", "reason": "market closed"}
+{"timestamp": "2026-09-02T08:43:23.637780+00:00", "type": "skipped", "reason": "market closed"}
+{"timestamp": "2026-09-02T09:30:09.782561+00:00", "type": "skipped", "reason": "market closed"}
+{"timestamp": "2026-09-02T10:30:07.704862+00:00", "type": "skipped", "reason": "market closed"}
+{"type": "exit", "timestamp": "2026-09-02T15:30:55.917880+00:00", "symbol": "SPY260908P00761000", "exit_reason": "STOP_LOSS", "entry_price": 4.31, "exit_price": 1.93, "realized_pl": -476.0, "order_id": "e97d2b37-457c-477e-82d7-bf694dede190", "order_status": "pending_new"}
+{"type": "exit", "timestamp": "2026-09-02T15:30:57.046939+00:00", "symbol": "SPY260908P00763000", "exit_reason": "STOP_LOSS", "entry_price": 3.72, "exit_price": 2.45, "realized_pl": -254.0, "order_id": "9a1dc988-c4e2-4c4b-89e2-39594ad86456", "order_status": "pending_new"}
+{"type": "trade_attempt", "timestamp": "2026-09-02T17:30:32.467139+00:00", "signal": "BEARISH", "confidence": "MEDIUM", "reason": "The 5-day SMA is slightly below the 20-day SMA, and there is negative momentum, suggesting a potential downward trend.", "contract_symbol": "SPY260908P00764000", "strike": 764.0, "expiration": "2026-09-08", "contracts_bought": 3, "premium_paid": 3.27, "order_id": "f87285db-50a1-40f0-b557-775346d6342f", "order_status": "pending_new"}
+{"type": "trade_attempt", "timestamp": "2026-09-02T18:30:41.626851+00:00", "signal": "BEARISH", "confidence": "MEDIUM", "reason": "Recent headlines indicate geopolitical tensions and economic uncertainties, which may lead to market volatility and downward pressure.", "contract_symbol": "SPY260908P00765000", "strike": 765.0, "expiration": "2026-09-08", "contracts_bought": 3, "premium_paid": 3.19, "order_id": "eaa7ffcb-90a7-4dbc-898c-6a72ce64d263", "order_status": "pending_new"}
+{"timestamp": "2026-09-02T20:30:14.407780+00:00", "type": "skipped", "reason": "market closed"}
+{"timestamp": "2026-09-02T21:30:12.005422+00:00", "type": "skipped", "reason": "market closed"}
+{"timestamp": "2026-09-02T22:30:15.349282+00:00", "type": "skipped", "reason": "market closed"}
+{"timestamp": "2026-09-02T23:30:13.737607+00:00", "type": "skipped", "reason": "market closed"}
+{"timestamp": "2026-09-03T00:30:15.853635+00:00", "type": "skipped", "reason": "market closed"}
+{"timestamp": "2026-09-03T01:30:13.883915+00:00", "type": "skipped", "reason": "market closed"}
+{"timestamp": "2026-09-03T02:30:37.090887+00:00", "type": "skipped", "reason": "market closed"}

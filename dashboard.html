@@ -49,6 +49,12 @@
     margin-bottom: 0.75rem;
   }
   .card.skipped { opacity: 0.55; }
+  .skip-row {
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    padding: 0.4rem 1.25rem;
+    margin-bottom: 0.75rem;
+  }
   .card-top {
     display: flex;
     justify-content: space-between;
@@ -64,9 +70,9 @@
     font-size: 0.8rem;
     font-weight: 600;
   }
-  .badge.BULLISH { background: rgba(62,207,108,0.15); color: var(--green); }
-  .badge.BEARISH { background: rgba(232,85,90,0.15); color: var(--red); }
-  .badge.NEUTRAL { background: rgba(107,114,128,0.2); color: var(--grey); }
+  .badge.BULLISH, .badge.TAKE_PROFIT { background: rgba(62,207,108,0.15); color: var(--green); }
+  .badge.BEARISH, .badge.STOP_LOSS { background: rgba(232,85,90,0.15); color: var(--red); }
+  .badge.NEUTRAL, .badge.TIME_EXIT { background: rgba(107,114,128,0.2); color: var(--grey); }
 
   .reason { color: var(--text-dim); margin: 0.4rem 0; font-size: 0.95rem; }
 
@@ -232,12 +238,52 @@ function fmtTime(ts) {
   return isNaN(d) ? ts : d.toLocaleString();
 }
 
-function renderSkipped(entry) {
-  return `<div class="card skipped">
+function renderSkippedGroup(run) {
+  // run is newest-first; oldest is last.
+  const oldest = run[run.length - 1].timestamp;
+  const newest = run[0].timestamp;
+  const count = run.length;
+  const range = count === 1
+    ? fmtTime(oldest)
+    : `${fmtTime(oldest)} – ${fmtTime(newest)}`;
+  return `<div class="skip-row">Market closed — skipped ${count} cycle${count > 1 ? "s" : ""} (${range})</div>`;
+}
+
+function renderExit(entry) {
+  const pl = entry.realized_pl ?? 0;
+  const status = entry.order_status || "";
+  return `<div class="card">
     <div class="card-top">
-      <span>Market closed — skipped</span>
+      <span class="badge ${entry.exit_reason}">${entry.exit_reason}</span>
       <span class="timestamp">${fmtTime(entry.timestamp)}</span>
     </div>
+    <div class="details">
+      <div><span>Symbol</span>${entry.symbol || "-"}</div>
+      <div><span>Entry price</span>${entry.entry_price ?? "-"}</div>
+      <div><span>Exit price</span>${entry.exit_price ?? "-"}</div>
+      <div><span>Realized P&amp;L</span><span class="status ${pl >= 0 ? "ok" : "bad"}">${pl >= 0 ? "+" : ""}$${pl.toFixed(2)}</span></div>
+      <div><span>Order status</span><span class="status ${statusClass(status)}">${status || "-"}</span></div>
+    </div>
+  </div>`;
+}
+
+function renderHalt(entry) {
+  return `<div class="card">
+    <div class="card-top">
+      <span class="badge STOP_LOSS">CIRCUIT BREAKER</span>
+      <span class="timestamp">${fmtTime(entry.timestamp)}</span>
+    </div>
+    <p class="reason">New entries halted — down ${(entry.daily_loss_pct * 100).toFixed(1)}% today.</p>
+  </div>`;
+}
+
+function renderAbort(entry) {
+  return `<div class="card">
+    <div class="card-top">
+      <span class="badge STOP_LOSS">SAFETY ABORT</span>
+      <span class="timestamp">${fmtTime(entry.timestamp)}</span>
+    </div>
+    <p class="reason">${entry.reason || ""}</p>
   </div>`;
 }
 
@@ -261,6 +307,40 @@ function renderTrade(entry) {
   </div>`;
 }
 
+// One card/row per entry type. Anything not in this map (a legacy
+// untyped entry, or a genuine trade_attempt) falls back to renderTrade.
+const RENDERERS = {
+  exit: renderExit,
+  circuit_breaker_halt: renderHalt,
+  safety_abort: renderAbort,
+};
+
+function renderEntry(entry) {
+  return (RENDERERS[entry.type] || renderTrade)(entry);
+}
+
+// Collapse consecutive "skipped" entries (in display order, newest-first)
+// into one compact row instead of one card each. Anything else breaks the
+// run and always renders as its own normal card.
+function renderFeed(entries) {
+  const html = [];
+  let run = [];
+  const flushRun = () => {
+    if (run.length) html.push(renderSkippedGroup(run));
+    run = [];
+  };
+  for (const e of entries) {
+    if (e.type === "skipped") {
+      run.push(e);
+    } else {
+      flushRun();
+      html.push(renderEntry(e));
+    }
+  }
+  flushRun();
+  return html.join("");
+}
+
 fetch("trade_log.jsonl")
   .then(r => {
     if (!r.ok) throw new Error("fetch failed: " + r.status);
@@ -282,9 +362,7 @@ fetch("trade_log.jsonl")
       <div class="stat"><div class="num">${skipped}</div><div class="label">Skipped (market closed)</div></div>
     `;
 
-    document.getElementById("cards").innerHTML = entries
-      .map(e => e.type === "skipped" ? renderSkipped(e) : renderTrade(e))
-      .join("");
+    document.getElementById("cards").innerHTML = renderFeed(entries);
   })
   .catch(err => {
     document.getElementById("error").textContent =
