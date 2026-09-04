@@ -2,7 +2,33 @@
 
 **An options trading agent that reads the tape *and* the news — not just the tape.**
 
+![Quant Mosquito dashboard](screenshots/dashboard-overview.png)
+
 Most rule-based trading bots react to numbers alone. Quant Mosquito feeds real SPY technical indicators *and* live news headlines to an LLM, lets it reason through both, and only then acts — sizing, entering, managing, and exiting real paper-account option trades on its own schedule.
+
+## Tech stack
+
+The agent loop is plain Python, invoked on a schedule with no long-running process. Each cycle pulls market data and news through Alpaca's Python SDK, hands both to a Featherless-hosted LLM over an OpenAI-compatible chat completion call to get a signal and a confidence level, then — for anything that actually needs to place or close an order — shells out to Alpaca's official CLI rather than the SDK's order-submission methods, so the SDK stays read-only and every state-changing action goes through one auditable, non-Python execution path.
+
+**Language & Runtime**
+- Python 3.13 — the agent loop, signal logic, and position management
+- `python-dotenv` — loads Alpaca/Featherless credentials from `.env`
+- `subprocess` (stdlib) — invokes the Alpaca CLI binary from `position_manager.run_alpaca_cli()`
+
+**Trading & Market Data**
+- `alpaca-py` 0.44 (`TradingClient`, `StockHistoricalDataClient`, `OptionHistoricalDataClient`, `NewsClient`) — account state, SPY daily bars, option chain lookups, and news headlines; all read-only
+- `pandas` (pulled in via `alpaca-py`'s `.df` accessor) — the DataFrame `get_signal.py` slices to pull closing prices out of bar data
+- Alpaca CLI (`tools\alpaca.exe`, official Go binary, downloaded separately — not a Python dependency) — the only thing in this project that submits or closes an order: `order submit` for entries, `position close` for exits, and `doctor` as a pre-flight check that the CLI is actually resolved to the paper endpoint before either runs
+
+**AI/LLM**
+- Featherless AI — hosts the model; reached over its OpenAI-compatible API
+- `openai` 3.6 (official Python SDK) — the client used to call Featherless, with `base_url` pointed at Featherless instead of OpenAI
+- Model: `Qwen/Qwen2.5-7B-Instruct` (set via `FEATHERLESS_MODEL` in `.env`, swappable to anything Featherless hosts)
+
+**Dev tooling**
+- None. No test framework — `test_*.py` files are plain `assert`-based scripts using only the standard library (`unittest`-free, no `pytest`).
+
+One correction from your brief: you listed "Alpaca CLI" without specifying its role — in this codebase it's narrowly scoped to order submission, position closes, and the paper-endpoint safety check, nothing else. Market data, account queries, and position listing all go through the SDK.
 
 ## Why this is different
 
@@ -54,9 +80,19 @@ schtasks /create /tn "QuantMosquitoAgent" /tr "C:\Projects\quant-mosquito\run_ag
 
 It's safe to run outside market hours — `run_agent.py` checks Alpaca's clock first and logs a `skipped` cycle instead of trading.
 
+![run_agent.py executing a real cycle](screenshots/run-agent-terminal.png)
+
+This is really hitting the paper account, not a mock — same account, same positions, visible on Alpaca's own dashboard:
+
+![Alpaca paper trading dashboard showing live positions](screenshots/alpaca-account.png)
+
 ## Dashboard
 
 `dashboard.html` is a static, dependency-free page. It renders an equity curve at the top (portfolio value over time, plotted with plain `<canvas>` — no chart library) followed by a card per cycle from `trade_log.jsonl` (signal, reasoning, contract, order status), newest first, with header counts for total/traded/skipped cycles.
+
+Each card shows signal, confidence, reasoning, and contract details — reasoning that's grounded in real headlines, not just indicator numbers, which is why consecutive cycles can flip between BEARISH and BULLISH as the news changes, not just the SMA cross:
+
+![Trade cards showing signal, confidence, reasoning, and contract details, with the call flipping between BEARISH and BULLISH across cycles](screenshots/trade-card.png)
 
 The equity curve reads `portfolio_history.json`, a static snapshot — it does not update live. Re-run this before opening the dashboard to refresh it:
 
@@ -87,6 +123,8 @@ Before trusting the SMA-cross logic that feeds into the live signal, it was back
 - **What was tested:** the pure technical component only — BULLISH if SMA5 > SMA20, BEARISH if SMA5 < SMA20 — with no LLM and no news, against 90 days of real SPY historical bars. Each call was checked against SPY's actual closing price 5 trading days later.
 - **Result:** 65 signals generated, **32.3% overall accuracy** — both the BULLISH (38.1%) and BEARISH (21.7%) breakdowns landed below the 50% random-chance baseline.
 - **Honest interpretation:** a raw SMA cross is a lagging indicator — by the time SMA5 crosses SMA20, the move it's flagging has often already happened, so it tends to catch reversals late rather than predict them. On its own, it's not a tradeable edge. That's precisely why the live agent never trades on the SMA cross alone: it's one input the LLM weighs alongside momentum and real news headlines, and the LLM is free to override a weak or stale technical signal rather than follow it blindly. The backtest validates that the technical foundation is honestly weak in isolation — which is the point of layering reasoning on top of it, not a reason to trust the technical signal by itself.
+
+![Backtest accuracy results](screenshots/backtest-results.png)
 
 Full day-by-day results are in `backtest_results.csv` for anyone who wants to check the math.
 
