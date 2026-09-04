@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Quant Mosquito — Trade Log Dashboard</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --card-bg: #1a1d24;
+    --border: #2a2e37;
+    --text: #e6e8eb;
+    --text-dim: #9aa1ac;
+    --green: #3ecf6c;
+    --red: #e8555a;
+    --grey: #6b7280;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 2rem;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+  }
+  h1 { margin: 0 0 0.25rem; font-size: 1.5rem; }
+  .subtitle { color: var(--text-dim); margin-bottom: 1.5rem; }
+
+  .stats {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 2rem;
+    flex-wrap: wrap;
+  }
+  .stat {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.75rem 1.25rem;
+    min-width: 140px;
+  }
+  .stat .num { font-size: 1.75rem; font-weight: 600; }
+  .stat .label { color: var(--text-dim); font-size: 0.85rem; }
+
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 0.75rem;
+  }
+  .card.skipped { opacity: 0.55; }
+  .skip-row {
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    padding: 0.4rem 1.25rem;
+    margin-bottom: 0.75rem;
+  }
+  .card-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.4rem;
+  }
+  .timestamp { color: var(--text-dim); font-size: 0.85rem; }
+
+  .badge {
+    display: inline-block;
+    padding: 0.15rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 600;
+  }
+  .badge.BULLISH, .badge.TAKE_PROFIT { background: rgba(62,207,108,0.15); color: var(--green); }
+  .badge.BEARISH, .badge.STOP_LOSS { background: rgba(232,85,90,0.15); color: var(--red); }
+  .badge.NEUTRAL, .badge.TIME_EXIT { background: rgba(107,114,128,0.2); color: var(--grey); }
+
+  .reason { color: var(--text-dim); margin: 0.4rem 0; font-size: 0.95rem; }
+
+  .details {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 0.4rem 1rem;
+    margin-top: 0.5rem;
+    font-size: 0.9rem;
+  }
+  .details div span { color: var(--text-dim); display: block; font-size: 0.75rem; }
+
+  .status { font-weight: 600; }
+  .status.ok { color: var(--green); }
+  .status.bad { color: var(--red); }
+  .status.neutral { color: var(--grey); }
+
+  #error { color: var(--red); }
+
+  .chart-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.5rem;
+  }
+  .chart-card h2 { margin: 0 0 0.75rem; font-size: 1rem; font-weight: 600; }
+  #equity-chart { width: 100%; height: 220px; display: block; }
+  #equity-empty { color: var(--text-dim); font-size: 0.9rem; }
+</style>
+</head>
+<body>
+  <h1>Quant Mosquito</h1>
+  <div class="subtitle">Trade log dashboard — read-only view of trade_log.jsonl</div>
+
+  <div class="chart-card">
+    <h2>Equity curve</h2>
+    <canvas id="equity-chart"></canvas>
+    <div id="equity-empty" style="display:none;">No portfolio_history.json found — run export_portfolio_history.py first.</div>
+  </div>
+
+  <div class="stats" id="stats"></div>
+  <div id="cards"></div>
+  <div id="error"></div>
+
+<script>
+const STARTING_EQUITY = 100000;
+
+// Draw a simple equity-over-time line chart with plain canvas, no library.
+function drawEquityChart(canvas, points) {
+  const dpr = window.devicePixelRatio || 1;
+  // ponytail: clientWidth/Height can legitimately read 0 if a layout pass
+  // hasn't happened yet when this runs (e.g. a very fast local fetch
+  // resolving before first paint). Falling back to the parent's width and
+  // the CSS-declared height keeps the chart visible instead of blank;
+  // ResizeObserver corrects it to the exact size once layout catches up.
+  const cssWidth = canvas.clientWidth || canvas.parentElement.clientWidth || 760;
+  const cssHeight = canvas.clientHeight || 220;
+  canvas.width = cssWidth * dpr;
+  canvas.height = cssHeight * dpr;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+
+  const padding = { top: 10, right: 15, bottom: 24, left: 70 };
+  const chartW = cssWidth - padding.left - padding.right;
+  const chartH = cssHeight - padding.top - padding.bottom;
+
+  const values = points.map(p => p.equity_value);
+  const min = Math.min(...values, STARTING_EQUITY);
+  const max = Math.max(...values, STARTING_EQUITY);
+  const range = max - min || 1;
+
+  const xForIndex = i => padding.left + (i / (points.length - 1)) * chartW;
+  const yForValue = v => padding.top + chartH - ((v - min) / range) * chartH;
+
+  ctx.clearRect(0, 0, cssWidth, cssHeight);
+  ctx.font = "11px -apple-system, Segoe UI, Roboto, sans-serif";
+
+  // Y-axis grid lines + $ labels (4 bands).
+  ctx.strokeStyle = "#2a2e37";
+  ctx.fillStyle = "#9aa1ac";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  const bands = 4;
+  for (let i = 0; i <= bands; i++) {
+    const v = min + (range * i) / bands;
+    const y = yForValue(v);
+    ctx.beginPath();
+    ctx.moveTo(padding.left, y);
+    ctx.lineTo(padding.left + chartW, y);
+    ctx.stroke();
+    ctx.fillText("$" + Math.round(v).toLocaleString(), padding.left - 8, y);
+  }
+
+  // Dashed reference line at the starting equity, so gains/losses read at a glance.
+  const startY = yForValue(STARTING_EQUITY);
+  ctx.save();
+  ctx.setLineDash([4, 4]);
+  ctx.strokeStyle = "#6b7280";
+  ctx.beginPath();
+  ctx.moveTo(padding.left, startY);
+  ctx.lineTo(padding.left + chartW, startY);
+  ctx.stroke();
+  ctx.restore();
+
+  // X-axis labels: first, middle, last timestamp.
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  [0, Math.floor((points.length - 1) / 2), points.length - 1].forEach(i => {
+    const label = new Date(points[i].timestamp).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    ctx.fillText(label, xForIndex(i), padding.top + chartH + 6);
+  });
+
+  // The equity line itself — green if up from the start, red if down.
+  const up = values[values.length - 1] >= STARTING_EQUITY;
+  ctx.strokeStyle = up ? "#3ecf6c" : "#e8555a";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  points.forEach((p, i) => {
+    const x = xForIndex(i);
+    const y = yForValue(p.equity_value);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+}
+
+// Redraws whenever the canvas's actual size changes -- not just once at
+// load. A one-time draw can catch the canvas at 0 width (e.g. the tab or
+// pane is hidden at that moment) and never recover once it's visible;
+// ResizeObserver fires again as soon as a real size shows up.
+let equityPoints = null;
+const equityCanvas = document.getElementById("equity-chart");
+// Must stay referenced -- an observer with no live reference is eligible
+// for GC, which silently stops its callback from firing.
+const equityResizeObserver = new ResizeObserver(() => {
+  if (equityPoints) drawEquityChart(equityCanvas, equityPoints);
+});
+equityResizeObserver.observe(equityCanvas);
+
+fetch("portfolio_history.json")
+  .then(r => { if (!r.ok) throw new Error("not found"); return r.json(); })
+  .then(points => {
+    if (!points.length) throw new Error("empty");
+    equityPoints = points;
+    drawEquityChart(equityCanvas, points);
+  })
+  .catch(() => {
+    document.getElementById("equity-chart").style.display = "none";
+    document.getElementById("equity-empty").style.display = "block";
+  });
+
+// Color a status word green (success-ish) or red (error/skip), grey otherwise.
+function statusClass(status) {
+  if (!status) return "neutral";
+  const s = status.toLowerCase();
+  if (s.includes("error") || s.includes("skipped")) return "bad";
+  if (s.includes("fill") || s.includes("accept") || s.includes("new") || s.includes("pending")) return "ok";
+  return "neutral";
+}
+
+function fmtTime(ts) {
+  const d = new Date(ts);
+  return isNaN(d) ? ts : d.toLocaleString();
+}
+
+function renderSkippedGroup(run) {
+  // run is newest-first; oldest is last.
+  const oldest = run[run.length - 1].timestamp;
+  const newest = run[0].timestamp;
+  const count = run.length;
+  const range = count === 1
+    ? fmtTime(oldest)
+    : `${fmtTime(oldest)} – ${fmtTime(newest)}`;
+  return `<div class="skip-row">Market closed — skipped ${count} cycle${count > 1 ? "s" : ""} (${range})</div>`;
+}
+
+function renderExit(entry) {
+  const pl = entry.realized_pl ?? 0;
+  const status = entry.order_status || "";
+  return `<div class="card">
+    <div class="card-top">
+      <span class="badge ${entry.exit_reason}">${entry.exit_reason}</span>
+      <span class="timestamp">${fmtTime(entry.timestamp)}</span>
+    </div>
+    <div class="details">
+      <div><span>Symbol</span>${entry.symbol || "-"}</div>
+      <div><span>Entry price</span>${entry.entry_price ?? "-"}</div>
+      <div><span>Exit price</span>${entry.exit_price ?? "-"}</div>
+      <div><span>Realized P&amp;L</span><span class="status ${pl >= 0 ? "ok" : "bad"}">${pl >= 0 ? "+" : ""}$${pl.toFixed(2)}</span></div>
+      <div><span>Order status</span><span class="status ${statusClass(status)}">${status || "-"}</span></div>
+    </div>
+  </div>`;
+}
+
+function renderHalt(entry) {
+  return `<div class="card">
+    <div class="card-top">
+      <span class="badge STOP_LOSS">CIRCUIT BREAKER</span>
+      <span class="timestamp">${fmtTime(entry.timestamp)}</span>
+    </div>
+    <p class="reason">New entries halted — down ${(entry.daily_loss_pct * 100).toFixed(1)}% today.</p>
+  </div>`;
+}
+
+function renderAbort(entry) {
+  return `<div class="card">
+    <div class="card-top">
+      <span class="badge STOP_LOSS">SAFETY ABORT</span>
+      <span class="timestamp">${fmtTime(entry.timestamp)}</span>
+    </div>
+    <p class="reason">${entry.reason || ""}</p>
+  </div>`;
+}
+
+function renderTrade(entry) {
+  const signal = entry.signal || "?";
+  const status = entry.order_status || "";
+  return `<div class="card">
+    <div class="card-top">
+      <span class="badge ${signal}">${signal}</span>
+      <span class="timestamp">${fmtTime(entry.timestamp)}</span>
+    </div>
+    <p class="reason">${entry.reason || ""}</p>
+    <div class="details">
+      <div><span>Confidence</span>${entry.confidence || "-"}</div>
+      <div><span>Contract</span>${entry.contract_symbol || "-"}</div>
+      <div><span>Strike</span>${entry.strike ?? "-"}</div>
+      <div><span>Expiration</span>${entry.expiration || "-"}</div>
+      <div><span>Contracts bought</span>${entry.contracts_bought ?? "-"}</div>
+      <div><span>Order status</span><span class="status ${statusClass(status)}">${status || "-"}</span></div>
+    </div>
+  </div>`;
+}
+
+// One card/row per entry type. Anything not in this map (a legacy
+// untyped entry, or a genuine trade_attempt) falls back to renderTrade.
+const RENDERERS = {
+  exit: renderExit,
+  circuit_breaker_halt: renderHalt,
+  safety_abort: renderAbort,
+};
+
+function renderEntry(entry) {
+  return (RENDERERS[entry.type] || renderTrade)(entry);
+}
+
+// Collapse consecutive "skipped" entries (in display order, newest-first)
+// into one compact row instead of one card each. Anything else breaks the
+// run and always renders as its own normal card.
+function renderFeed(entries) {
+  const html = [];
+  let run = [];
+  const flushRun = () => {
+    if (run.length) html.push(renderSkippedGroup(run));
+    run = [];
+  };
+  for (const e of entries) {
+    if (e.type === "skipped") {
+      run.push(e);
+    } else {
+      flushRun();
+      html.push(renderEntry(e));
+    }
+  }
+  flushRun();
+  return html.join("");
+}
+
+fetch("trade_log.jsonl")
+  .then(r => {
+    if (!r.ok) throw new Error("fetch failed: " + r.status);
+    return r.text();
+  })
+  .then(text => {
+    const entries = text.split("\n")
+      .map(line => line.trim())
+      .filter(Boolean)
+      .map(line => JSON.parse(line))
+      .reverse(); // newest first
+
+    const skipped = entries.filter(e => e.type === "skipped").length;
+    const trades = entries.length - skipped;
+
+    document.getElementById("stats").innerHTML = `
+      <div class="stat"><div class="num">${entries.length}</div><div class="label">Total cycles</div></div>
+      <div class="stat"><div class="num">${trades}</div><div class="label">Trades attempted</div></div>
+      <div class="stat"><div class="num">${skipped}</div><div class="label">Skipped (market closed)</div></div>
+    `;
+
+    document.getElementById("cards").innerHTML = renderFeed(entries);
+  })
+  .catch(err => {
+    document.getElementById("error").textContent =
+      "Could not load trade_log.jsonl (" + err.message + "). " +
+      "If you opened this file directly (file://), browsers block that fetch — " +
+      "run 'python -m http.server' in this folder and open http://localhost:8000/dashboard.html instead.";
+  });
+</script>
+</body>
+</html>
